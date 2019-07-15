@@ -12,10 +12,10 @@ import (
 	models "gem-resource/app/models"
 	v "gem-resource/app/utils/view"
 
+	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/satori/go.uuid"
 	"github.com/joho/godotenv"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/jwt"
 )
 
 var OauthConfig *oauth2.Config
@@ -55,6 +55,54 @@ func addCookie(w http.ResponseWriter, name string, value string) {
 	http.SetCookie(w, &cookie)
 }
 
+
+//ApiLayerFromCookie Self validation to check token validate
+func ApiLayerFromCookie(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie("session_token")
+	if err == nil {
+		loginSession := models.LoginSession{}
+		db:=models.OpenDB()
+		err := db.Debug().Where("session_value = ?",c.Value).First(&loginSession).Error
+		if err != nil{
+
+			v.RespondUnauthorized(w,"wrong session")
+			return
+		}
+		authorizationHeader := loginSession.AccessToken
+
+		// Kiểm tra xem có tồn tại token không
+		if authorizationHeader == "" {
+			v.Respond(w, v.Message(false, "An authorization header is required"))
+			return
+		}
+
+		token, err := jwt.Parse(authorizationHeader, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("There was an error")
+			}
+			return []byte("12345678"), nil
+		})
+		if err != nil {
+			v.Respond(w, v.Message(false, err.Error()))
+			return
+		}
+		if !token.Valid {
+			v.Respond(w, v.Message(false, "Invalid authorization token"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	}else{
+		v.RespondUnauthorized(w,"no session")
+	}	
+	})
+}
+
+
+func protected(w http.ResponseWriter, r *http.Request){
+	fmt.Fprintf(w,"Hola")
+}
+
 func main() {
 	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		// We can obtain the session token from the requests cookies, which come with every request
@@ -71,12 +119,10 @@ func main() {
 		}
 		//v.RespondSuccess(w," ")
 		return
-	}
-		// config := jwt.Config{}
-		// client := config.Client(context.Background())
-		url := OauthConfig.AuthCodeURL("gem-secrect-code")
-		fmt.Println(url)
-		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+	}	
+	url := OauthConfig.AuthCodeURL("gem-secrect-code")
+	fmt.Println(url)	
+	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 
 	})
 	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
@@ -119,9 +165,8 @@ func main() {
 		t := template.Must(template.ParseFiles("index.html"))
 		_ = t.Execute(w, "")
 	})
-	http.HandleFunc("protected-resource", func(w http.ResponseWriter, r *http.Request) {
-		t := template.Must(template.ParseFiles("index.html"))
-		_ = t.Execute(w, "")
-	})
+
+	finalHandler := http.HandlerFunc(protected)
+	http.Handle("/protected-resource", ApiLayerFromCookie(finalHandler))
 	log.Fatal(http.ListenAndServe(":9096", nil))
 }
