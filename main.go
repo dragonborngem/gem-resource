@@ -22,9 +22,13 @@ var OauthConfig *oauth2.Config
 
 // Endpoint is Google's OAuth 2.0 endpoint.
 var Endpoint = oauth2.Endpoint{
-	AuthURL:   "http://localhost:8000/auth",
-	TokenURL:  "http://localhost:8000/token",
+	AuthURL:   "http://localhost:9094/auth",
+	TokenURL:  "http://localhost:9094/token",
 	AuthStyle: oauth2.AuthStyleInParams,
+}
+
+type Claims struct {
+	jwt.StandardClaims
 }
 
 func init() {
@@ -69,28 +73,54 @@ func ApiLayerFromCookie(next http.Handler) http.Handler {
 			v.RespondUnauthorized(w,"wrong session")
 			return
 		}
-		authorizationHeader := loginSession.AccessToken
+		accessToken := loginSession.AccessToken
 
 		// Kiểm tra xem có tồn tại token không
-		if authorizationHeader == "" {
+		if accessToken == "" {
 			v.Respond(w, v.Message(false, "An authorization header is required"))
 			return
 		}
 
-		token, err := jwt.Parse(authorizationHeader, func(token *jwt.Token) (interface{}, error) {
+		token, err := jwt.Parse(accessToken, func(token *jwt.Token) (interface{}, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("There was an error")
 			}
 			return []byte("12345678"), nil
 		})
 		if err != nil {
-			v.Respond(w, v.Message(false, err.Error()))
-			return
-		}
-		if !token.Valid {
-			v.Respond(w, v.Message(false, "Invalid authorization token"))
-			return
-		}
+			if (err.Error() == "Token is expired"){
+				signingMethod := jwt.GetSigningMethod("HS256")
+				fmt.Println(token)
+				fmt.Println("=========================================")
+				expirationTime := time.Now().Add(24 * time.Hour)
+				claims := &Claims{
+					StandardClaims: jwt.StandardClaims{
+						// In JWT, the expiry time is expressed as unix milliseconds
+						ExpiresAt: expirationTime.Unix(),
+						Audience: os.Getenv("CLIENT_ID"),
+						Subject: loginSession.UserID,
+					},
+				}
+				newToken := jwt.NewWithClaims(signingMethod, claims)
+				tokenString, _ := newToken.SignedString([]byte("12345678"))
+				fmt.Println(tokenString)
+				fmt.Println(token)
+				fmt.Println("===================")
+				newToken, verr := jwt.Parse(tokenString, func(newToken *jwt.Token) (interface{}, error) {
+					if _, ok := newToken.Method.(*jwt.SigningMethodHMAC); !ok {
+						return nil, fmt.Errorf("There was an error")
+					}
+					return []byte("12345678"), nil
+				})
+				if verr != nil{
+					v.Respond(w, v.Message(false, verr.Error()))
+					return
+				}
+				}else{
+					v.Respond(w, v.Message(false, err.Error()))
+					return
+				}
+			}
 		next.ServeHTTP(w, r)
 	}else{
 		v.RespondUnauthorized(w,"no session")
