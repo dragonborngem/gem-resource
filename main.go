@@ -37,6 +37,15 @@ func init() {
 		log.Fatal("Error loading .env file")
 	}
 	RedirectURL := os.Getenv("REDIRECT_URL")
+	
+	if os.Getenv("MODE") != "" {
+		RedirectURL = os.Getenv("REDIRECT_URLL")
+		Endpoint = oauth2.Endpoint{
+			AuthURL:   "https://gem-auth.herokuapp.com/auth",
+			TokenURL:  "https://gem-auth.herokuapp.com/token",
+			AuthStyle: oauth2.AuthStyleInParams,
+		}
+	}
 	ClientID := os.Getenv("CLIENT_ID")
 	ClientSecret := os.Getenv("CLIENT_SECRET")
 	SCOPES := os.Getenv("SCOPES")
@@ -198,5 +207,9 @@ func main() {
 
 	finalHandler := http.HandlerFunc(protected)
 	http.Handle("/protected-resource", ApiLayerFromCookie(finalHandler))
-	log.Fatal(http.ListenAndServe(":9096", nil))
+	if os.Getenv("MODE") != "" {
+		log.Fatal(http.ListenAndServe(":"+os.Getenv("PORT"), nil))
+	} else {
+		log.Fatal(http.ListenAndServe(":"+"9096", nil))
+	}
 }
