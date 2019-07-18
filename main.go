@@ -165,6 +165,7 @@ func main() {
 
 	})
 	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("call?")
 		AuthCode := r.FormValue("code")
 		AccessToken, err := OauthConfig.Exchange(context.Background(), AuthCode)
 		fmt.Printf("%+v\n", AccessToken)
