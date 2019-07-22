@@ -10,6 +10,7 @@ import (
 	"time"
 
 	models "gem-resource/app/models"
+	library "gem-resource/app/library"
 	v "gem-resource/app/utils/view"
 
 	jwt "github.com/dgrijalva/jwt-go"
@@ -86,19 +87,28 @@ func ApiLayerFromCookie(next http.Handler) http.Handler {
 
 		// Kiểm tra xem có tồn tại token không
 		if accessToken == "" {
-			v.Respond(w, v.Message(false, "An authorization header is required"))
+			v.Respond(w, v.Message(false, "An cookie header is required"))
 			return
 		}
 
 		token, err := jwt.Parse(accessToken, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 				return nil, fmt.Errorf("There was an error")
 			}
-			return []byte("12345678"), nil
+			verifyKey, err := library.ReadPublicKey("./key/id_rsa_test.pub")
+				if err != nil {
+					//v.Respond(w, v.Message(false, err.Error()))
+					fmt.Println(err)
+					redirectURL := r.Header.Get("x-forwarded-proto") + "//" + r.Host + "/login-normal"
+					http.Redirect(w, r, redirectURL, 302)
+					return nil, err
+				}
+				return verifyKey, nil
 		})
 		if err != nil {
+			//try to renegrate new access token
 			if (err.Error() == "Token is expired"){
-				signingMethod := jwt.GetSigningMethod("HS256")
+				signingMethod := jwt.GetSigningMethod("RS256")
 				fmt.Println(token)
 				fmt.Println("=========================================")
 				expirationTime := time.Now().Add(24 * time.Hour)
@@ -110,8 +120,12 @@ func ApiLayerFromCookie(next http.Handler) http.Handler {
 						Subject: loginSession.UserID,
 					},
 				}
+				signKey, err := library.ReadPublicKey("./key/id_rsa_test.pub")
+				if err!=nil{
+					fmt.Println(err)
+				}
 				newToken := jwt.NewWithClaims(signingMethod, claims)
-				tokenString, _ := newToken.SignedString([]byte("12345678"))
+				tokenString, _ := newToken.SignedString(signKey)
 				fmt.Println(tokenString)
 				fmt.Println(token)
 				fmt.Println("===================")
@@ -167,6 +181,8 @@ func main() {
 	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("call?")
 		AuthCode := r.FormValue("code")
+		fmt.Println(AuthCode)
+		//time.Sleep(10*time.Second)
 		AccessToken, err := OauthConfig.Exchange(context.Background(), AuthCode)
 		fmt.Printf("%+v\n", AccessToken)
 		if err != nil {
